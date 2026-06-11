@@ -50,6 +50,10 @@ def main():
     args = parser.parse_args()
     # т.е. при запуске, если пользователь напишет python eval/run_eval.py, то скрипт увидит, что польз. ничего не указал и
     # по умолчанию возьмёт data/eval_questions.json и results.json
+    print(f"DEBUG: Questions path: {args.questions}")
+    print(f"DEBUG: Predictions path: {args.predictions}")
+    print(f"DEBUG: Questions file exists: {Path(args.questions).exists()}")
+    print(f"DEBUG: Predictions file exists: {Path(args.predictions).exists()}")
 
     if not Path(args.questions).exists():
         print(f"Ошибка: файл вопросов не найден по пути {args.questions}")
