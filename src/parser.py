@@ -1,4 +1,7 @@
-"""Модуль для парсинга и преобразования кодовой базы в чанки, хранящие функции и классы."""
+"""
+Модуль для парсинга и преобразования кодовой базы в чанки, хранящие функции и классы.
+Поддерживает Python (через ast) и Java (через tree-sitter).
+"""
 
 import ast
 import os
@@ -7,6 +10,28 @@ from pathlib import Path
 type ChunkDict = dict[str, str | int]
 
 def parse_file(file_path: str, repo_root: str | None = None) -> list[ChunkDict]:
+    """
+    Универсальный парсер: выбирает парсер по расширению файла.
+    
+    Args:
+        file_path: Путь к файлу (.py или .java)
+        repo_root: Корневая директория репозитория
+        
+    Returns:
+        Список словарей с информацией о каждом фрагменте
+    """
+    if file_path.endswith(".java"):
+        from .parser_java import parse_java_file
+        return parse_java_file(file_path, repo_root)
+    
+    elif file_path.endswith(".py"):
+        return parse_python_file(file_path, repo_root)
+    
+    else:
+        print(f"Неподдерживаемый формат файла: {file_path}")
+        return []
+
+def parse_python_file(file_path: str, repo_root: str | None = None) -> list[ChunkDict]:
     """
     Парсит один Python-файл и извлекает все функции и классы.
     
@@ -41,7 +66,6 @@ def parse_file(file_path: str, repo_root: str | None = None) -> list[ChunkDict]:
     # Обход с отслеживанием родителя
     def visit(node, parent_class=None):
         if isinstance(node, ast.ClassDef):
-            # Добавляем сам класс как чанк
             chunk_id = f"{rel_path}:{node.name}:{node.lineno}"
             chunks.append({
                 "id": chunk_id,
@@ -106,7 +130,7 @@ def parse_directory(directory_path: str) -> list[ChunkDict]:
         ]
         
         for file in files:
-            if file.endswith(".py"):
+            if file.endswith((".py", ".java")):
                 file_path = os.path.join(root, file)
                 chunks = parse_file(file_path, str(repo_root))
                 all_chunks.extend(chunks)
