@@ -9,6 +9,17 @@ from pathlib import Path
 
 type ChunkDict = dict[str, str | int]
 
+SKIP_DIRS = {
+    "venv",
+    ".venv",
+    "__pycache__",
+    "node_modules",
+    "dist",
+    "build",
+    ".mypy_cache",
+    ".pytest_cache",
+}
+
 def parse_file(file_path: str, repo_root: str | None = None) -> list[ChunkDict]:
     """
     Универсальный парсер: выбирает парсер по расширению файла.
@@ -126,7 +137,7 @@ def parse_directory(directory_path: str) -> list[ChunkDict]:
         # Пропускаем скрытые директории и виртуальные окружения
         dirs[:] = [
             d for d in dirs 
-            if not d.startswith(".") and d not in {"venv", "__pycache__", "node_modules"}
+            if not d.startswith(".") and d not in SKIP_DIRS
         ]
         
         for file in files:

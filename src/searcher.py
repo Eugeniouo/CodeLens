@@ -1,69 +1,84 @@
-"""Модуль для поиска ответа через ChromaDB."""
+"""Модуль для поиска по индексированной кодовой базе через ChromaDB."""
 
-import sys
+import argparse
+import time
+from functools import lru_cache
+from typing import Any
+
 import chromadb
-from sentence_transformers import SentenceTransformer
-from src.config import MODEL_NAME, DB_PATH, COLLECTION_NAME
+
+from .config import COLLECTION_NAME, DB_PATH, TOP_K
+from .embedder import encode_query, load_model
+
+type SearchResult = dict[str, Any]
 
 
+@lru_cache(maxsize=1)
 def init_searcher():
-    print("Loading models and connecting to database")
-    model = SentenceTransformer(MODEL_NAME)
-    client = chromadb.PersistentClient(path=DB_PATH)
+    """Кэшированная загрузка модели и БД для быстрого UI в Streamlit."""
+    model = load_model()
+    client = chromadb.PersistentClient(path=str(DB_PATH))
+    return model, client.get_collection(name=COLLECTION_NAME)
+
+
+def search(query: str, top_k: int = TOP_K) -> tuple[list[SearchResult], float]:
+    """Ищет top-k релевантных чанков кода и возвращает результаты + время поиска (Latency)."""
+    start_time = time.perf_counter()
     
-    collection = client.get_collection(name=COLLECTION_NAME)
-    return model, collection
+    query = query.strip()
+    if not query or top_k <= 0:
+        raise ValueError("Некорректный запрос или значение top_k.")
 
-
-def search(query: str, top_k: int = 5) -> list[dict]:
     model, collection = init_searcher()
-
-    query_embedding = model.encode(query).tolist()
+    query_embedding = encode_query(model, query).tolist()
 
     results = collection.query(
         query_embeddings=[query_embedding],
         n_results=top_k,
-        include=['metadatas', 'documents', 'distances']
+        include=["metadatas", "documents", "distances"],
     )
 
-    formatted_results = []
+    formatted_results = [
+        {
+            "id": c_id,
+            "rank": rank,
+            "score": 1.0 - float(dist),
+            "name": (meta or {}).get("name", "unknown"),
+            "file_path": (meta or {}).get("file_path", (meta or {}).get("path", "unknown")),
+            "source_code": doc or "",
+        }
+        for rank, (c_id, doc, meta, dist) in enumerate(
+            zip(results["ids"][0], results["documents"][0], results["metadatas"][0], results["distances"][0]),
+            start=1
+        )
+    ]
+    
+    latency = time.perf_counter() - start_time
+    return formatted_results, latency
 
-    if results and results['ids'][0]:
-        for i, (chunk_id, doc, metadata, distance) in enumerate(
-            zip(results['ids'][0], results['documents'][0], results['metadatas'][0], results['distances'][0])
-        ):
 
-            score = 1.0 - distance 
-            
-            formatted_results.append({
-                "id": chunk_id,
-                "rank": i + 1,
-                "score": score,
-                "name": metadata.get("name", "unknown"),
-                "file_path": metadata.get("path", "unknown"),
-                "source_code": doc
-            })
-            
-    return formatted_results
+def main() -> None:
+    """CLI для локального тестирования поиска."""
+    parser = argparse.ArgumentParser(description="Поиск по ChromaDB.")
+    parser.add_argument("query", nargs="+", help="Поисковый запрос")
+    parser.add_argument("--top-k", type=int, default=TOP_K, help="Кол-во результатов")
+    args = parser.parse_args()
+
+    query = " ".join(args.query)
+    print(f"\nRequest: {query}")
+    
+    results, latency = search(query=query, top_k=args.top_k)
+    
+    print(f"Latency: {latency:.4f} сек.\n" + "=" * 80)
+
+    for result in results:
+        print(f"Rank: {result['rank']} | Score: {result['score']:.4f} | ID: {result['id']}")
+        print(f"File: {result['file_path']} | Name: {result['name']}")
+        print("-" * 80)
+        
+        lines = result["source_code"].splitlines()
+        print("\n".join(lines[:12]) + ("\n..." if len(lines) > 12 else "") + "\n")
+
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        query = " ".join(sys.argv[1:])
-    else:
-        print("Использование: python searcher.py <ваш запрос>")
-        print("Пример: python searcher.py как создаётся токен доступа")
-        sys.exit(1)
-        
-    print(f"\nRequest: {query}\n" + "="*60)
-    
-    results = search(query, top_k=5)
-    
-    if not results:
-        print("Nothing was found")
-    else:
-        for res in results:
-            print(f"Rank: {res['rank']} | Score: {res['score']:.4f} | ID: {res['id']}")
-            print(f"File: {res['file_path']} | Name: {res['name']}")
-            print("-" * 60)
-            code_preview = "\n".join(res['source_code'].splitlines()[:3]) + "..."
-            print(f"Код:\n{code_preview}\n")
+    main()
