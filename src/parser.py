@@ -7,7 +7,192 @@ import ast
 import os
 from pathlib import Path
 
+_JAVA_PARSER_AVAILABLE = False
+try:
+    from .parser_java import parse_java_file as _parse_java_file
+    _JAVA_PARSER_AVAILABLE = True
+except ImportError:
+    _parse_java_file = None
+
 type ChunkDict = dict[str, str | int]
+
+SKIP_DIRS = {
+    "venv",
+    "__pycache__",
+    "node_modules",
+    "build",
+    "dist",
+    "target",
+}
+
+def get_relative_path(
+    file_path: str,
+    repo_root: str | None,
+) -> str:
+    """
+    Безопасно получает относительный путь.
+    Обрабатывает несовпадение регистров и путей на Windows.
+    """
+
+    if repo_root is None:
+        return str(file_path)
+
+    try:
+        return str(
+            Path(file_path)
+            .resolve()
+            .relative_to(Path(repo_root).resolve())
+        ).replace("\\", "/")
+
+    except (ValueError, RuntimeError):
+        return str(Path(file_path)).replace("\\", "/")
+
+def build_class_skeleton(node: ast.ClassDef) -> str:
+    """
+    Строит облегчённое представление класса.
+
+    Сохраняем:
+    - заголовок класса
+    - docstring
+    - поля класса
+    - __init__
+    - сигнатуры остальных методов
+    """
+    lines: list[str] = []
+
+    for decorator in node.decorator_list:
+        lines.append(f"@{ast.unparse(decorator)}")
+
+    bases = ", ".join(ast.unparse(base) for base in node.bases)
+
+    if bases:
+        lines.append(f"class {node.name}({bases}):")
+    else:
+        lines.append(f"class {node.name}:")
+
+    docstring = ast.get_docstring(node)
+
+    if docstring:
+        lines.append(f'"""{docstring}"""')
+
+    for child in node.body:
+        # class variables
+        if isinstance(child, (ast.Assign, ast.AnnAssign)):
+            lines.append(f"{ast.unparse(child)}")
+
+        # вложенные классы
+        elif isinstance(child, ast.ClassDef):
+            lines.append(f"class {child.name}: ...")
+
+        # constructor сохраняем полностью
+        elif isinstance(
+            child, (ast.FunctionDef, ast.AsyncFunctionDef)
+        ) and child.name == "__init__":
+
+            init_code = ast.unparse(child)
+
+            for line in init_code.splitlines():
+                lines.append(f"{line}")
+
+        # остальные методы - только сигнатуры
+        elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+
+            is_async = isinstance(child, ast.AsyncFunctionDef)
+            args = ast.unparse(child.args)
+            returns = ""
+
+            if child.returns:
+                returns = f" -> {ast.unparse(child.returns)}"
+
+            prefix = "async def" if is_async else "def"
+
+            lines.append(f"{prefix}{child.name}({args}){returns}:")
+            lines.append("...")
+
+    if len(lines) == 1:
+        lines.append("pass")
+
+    return "\n".join(lines)
+
+class ChunkCollector(ast.NodeVisitor):
+    """
+    Обходчик AST с поддержкой вложенных классов и функций.
+    Использует стеки для формирования полных имён (Class.NestedClass.method).
+    """
+
+    def __init__(
+        self,
+        source_code: str,
+        rel_path: str,
+    ):
+        self.source_code = source_code
+        self.rel_path = rel_path
+
+        self.class_stack: list[str] = []
+        self.function_stack: list[str] = []
+
+        self.chunks: list[ChunkDict] = []
+
+    def _build_name(self, current_name: str) -> str:
+
+        parts: list[str] = []
+
+        if self.class_stack:
+            parts.extend(self.class_stack)
+
+        if self.function_stack:
+            parts.extend(self.function_stack)
+
+        parts.append(current_name)
+
+        return ".".join(parts)
+
+    def visit_ClassDef(self, node: ast.ClassDef):
+        self.class_stack.append(node.name)
+        full_name = ".".join(self.class_stack)
+
+        self.chunks.append({
+            "id": f"{self.rel_path}:{full_name}:{node.lineno}",
+            "type": "class",
+            "name": full_name,
+            "file_path": self.rel_path,
+            "start_line": node.lineno,
+            "end_line": getattr(node, "end_lineno", node.lineno),
+            "docstring": ast.get_docstring(node) or "",
+            "source_code": build_class_skeleton(node),
+        })
+
+        # обходит детей 
+        self.generic_visit(node)
+
+        self.class_stack.pop()
+
+    def visit_FunctionDef(self, node: ast.FunctionDef):
+        full_name = self._build_name(node.name)
+
+        self.chunks.append({
+            "id": f"{self.rel_path}:{full_name}:{node.lineno}",
+            "type": "function",
+            "name": full_name,
+            "file_path": self.rel_path,
+            "start_line": node.lineno,
+            "end_line": getattr(node, "end_lineno", node.lineno),
+            "docstring": ast.get_docstring(node) or "",
+            "source_code": (
+                ast.get_source_segment(self.source_code, node) or ""
+            ),
+        })
+
+        # Запоминаем функцию в стеке, чтобы поймать вложенные функции
+        self.function_stack.append(node.name)
+        self.generic_visit(node)
+        self.function_stack.pop()
+
+    def visit_AsyncFunctionDef(
+        self,
+        node: ast.AsyncFunctionDef,
+    ):
+        self.visit_FunctionDef(node)
 
 def parse_file(file_path: str, repo_root: str | None = None) -> list[ChunkDict]:
     """
@@ -21,8 +206,10 @@ def parse_file(file_path: str, repo_root: str | None = None) -> list[ChunkDict]:
         Список словарей с информацией о каждом фрагменте
     """
     if file_path.endswith(".java"):
-        from .parser_java import parse_java_file
-        return parse_java_file(file_path, repo_root)
+        if not _JAVA_PARSER_AVAILABLE:
+            print(f"️  Java-парсер недоступен (не установлены tree-sitter/tree-sitter-java). Пропускаем {file_path}")
+            return []
+        return _parse_java_file(file_path, repo_root)
     
     elif file_path.endswith(".py"):
         return parse_python_file(file_path, repo_root)
@@ -42,71 +229,26 @@ def parse_python_file(file_path: str, repo_root: str | None = None) -> list[Chun
     Returns:
         Список словарей с информацией о каждом фрагменте кода
     """
-
-    chunks: list[ChunkDict] = []
     
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             source_code = f.read()
     except (UnicodeDecodeError, IOError) as e:
         print(f"Ошибка чтения файла {file_path}: {e}")
-        return chunks
+        return []
     
     try:
         tree = ast.parse(source_code)
     except SyntaxError as e:
         print(f"Синтаксическая ошибка в {file_path}: {e}")
-        return chunks
+        return []
     
-    if repo_root:
-        rel_path = str(Path(file_path).relative_to(repo_root)).replace("\\", "/")
-    else:
-        rel_path = file_path
-    
-    # Обход с отслеживанием родителя
-    def visit(node, parent_class=None):
-        if isinstance(node, ast.ClassDef):
-            chunk_id = f"{rel_path}:{node.name}:{node.lineno}"
-            chunks.append({
-                "id": chunk_id,
-                "type": "class",
-                "name": node.name,
-                "file_path": rel_path,
-                "start_line": node.lineno,
-                "end_line": getattr(node, "end_lineno", node.lineno),
-                "docstring": ast.get_docstring(node) or "",
-                "source_code": ast.get_source_segment(source_code, node) or "",
-            })
-            # Рекурсивно обходим тело класса
-            for child in ast.iter_child_nodes(node):
-                visit(child, parent_class=node.name)
-                
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            if parent_class:
-                # Метод класса
-                chunk_id = f"{rel_path}:{parent_class}.{node.name}:{node.lineno}"
-                name = f"{parent_class}.{node.name}"
-            else:
-                # Обычная функция
-                chunk_id = f"{rel_path}:{node.name}:{node.lineno}"
-                name = node.name
-            
-            chunks.append({
-                "id": chunk_id,
-                "type": "function",
-                "name": name,
-                "file_path": rel_path,
-                "start_line": node.lineno,
-                "end_line": getattr(node, "end_lineno", node.lineno),
-                "docstring": ast.get_docstring(node) or "",
-                "source_code": ast.get_source_segment(source_code, node) or "",
-            })
-        else:
-            for child in ast.iter_child_nodes(node):
-                visit(child, parent_class)
-    
-    visit(tree)
-    return chunks
+    rel_path = get_relative_path(file_path, repo_root)
+
+    collector = ChunkCollector(source_code, rel_path)
+    collector.visit(tree)
+
+    return collector.chunks
 
 
 def parse_directory(directory_path: str) -> list[ChunkDict]:
@@ -125,8 +267,8 @@ def parse_directory(directory_path: str) -> list[ChunkDict]:
     for root, dirs, files in os.walk(repo_root):
         # Пропускаем скрытые директории и виртуальные окружения
         dirs[:] = [
-            d for d in dirs 
-            if not d.startswith(".") and d not in {"venv", "__pycache__", "node_modules"}
+            d for d in dirs
+            if not d.startswith(".") and d not in SKIP_DIRS
         ]
         
         for file in files:
