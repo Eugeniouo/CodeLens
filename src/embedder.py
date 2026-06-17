@@ -1,25 +1,105 @@
 """Модуль для преобразования кодовой базы в эмбеддинги."""
 
-from sentence_transformers import SentenceTransformer
 import numpy as np
+from sentence_transformers import SentenceTransformer
+from pathlib import Path
+
 from src.config import MODEL_NAME
 
-def get_embeddings(texts: list[str], model_name: str = MODEL_NAME) -> np.ndarray:
+
+def chunk_to_text(chunk: dict) -> str:
     """
-    Вычисляет эмбеддинги для списка текстов.
+    Преобразует чанк кода в текст для подачи в модель.
 
     Args:
-        texts (list[str]): список текстов
-        model_name (str): имя модели sentence-transformers
+        chunk: Словарь с полями name, file_path, docstring, source_code.
 
     Returns:
-        np.ndarray: матрица эмбеддингов
+        Строка, готовая для векторизации.
     """
-    model = SentenceTransformer(model_name)
-    embeddings = model.encode(
+    #ATTENTION: возможно, стоит передавать не только имя, но и путь к файлу, если система будет работать не точно.
+    parts = [
+        f"passage: Type: {chunk['type']}", #passage - префикс для улучшения качества поиска e5-small
+        f"Name: {chunk['name']}",
+        f"File: {Path(chunk['file_path']).name}",
+    ]
+
+    if chunk.get("docstring"):
+        parts.append(f"Description: {chunk['docstring']}")
+    parts.append(f"Code:\n{chunk['source_code']}")
+    
+    return "\n".join(parts)
+
+
+def load_model(model_name: str = MODEL_NAME) -> SentenceTransformer:
+    """
+    Загружает модель sentence-transformers.
+
+    Args:
+        model_name: Имя модели из HuggingFace.
+
+    Returns:
+        Загруженная модель.
+    """
+    return SentenceTransformer(model_name)
+
+
+def encode_texts(
+    model: SentenceTransformer,
+    texts: list[str],
+    show_progress_bar: bool = True,
+) -> np.ndarray:
+    """
+    Векторизует список текстов.
+
+    Args:
+        model: Загруженная модель SentenceTransformer.
+        texts: Список строк для векторизации.
+        show_progress_bar: Показывать прогресс.
+
+    Returns:
+        Матрица эмбеддингов формы (len(texts), embedding_dim).
+    """
+    return model.encode(
         texts,
-        show_progress_bar=True,
+        normalize_embeddings=True,
+        show_progress_bar=show_progress_bar,
         convert_to_numpy=True,
-        normalize_embeddings=True
     )
-    return embeddings
+
+
+def encode_chunks(
+    model: SentenceTransformer,
+    chunks: list[dict],
+    show_progress_bar: bool = True,
+) -> np.ndarray:
+    """
+    Векторизует список чанков кода.
+
+    Обёртка, принимает сразу чанки, а не строки.
+
+    Args:
+        model: Загруженная модель.
+        chunks: Список чанков из parser.py.
+        show_progress_bar: Показывать прогресс.
+
+    Returns:
+        Матрица эмбеддингов формы (len(chunks), embedding_dim).
+    """
+    texts = [chunk_to_text(chunk) for chunk in chunks]
+    return encode_texts(model, texts, show_progress_bar=show_progress_bar)
+
+
+def encode_query(model: SentenceTransformer, query: str) -> np.ndarray:
+    """
+    Векторизует один поисковый запрос.
+
+    Args:
+        model: Загруженная модель.
+        query: Текст запроса пользователя.
+
+    Returns:
+        Вектор запроса формы (embedding_dim,).
+    """
+    query_text = f"query: {query}" #query - префикс для улучшения качества поиска e5-small
+    return encode_texts(model, [query_text], show_progress_bar=False)[0]
