@@ -3,10 +3,7 @@
 import sys
 import chromadb
 from sentence_transformers import SentenceTransformer
-
-MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
-DB_PATH = "./chroma_db"
-COLLECTION_NAME = "code_chunks"
+from src.config import MODEL_NAME, DB_PATH, COLLECTION_NAME
 
 
 def init_searcher():
