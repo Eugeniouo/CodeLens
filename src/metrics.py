@@ -21,7 +21,6 @@ class Prediction:
     question_id: str
     top_5_chunks: list[str]
 
-# убирает проблемы по бокам strip() и заменяет \ на /
 def _normalize_chunk_id(chunk_id: str) -> str:
     return chunk_id.strip().replace("\\", "/")
 
@@ -31,16 +30,20 @@ def _chunks_match(a: str, b: str, line_tolerance: int = 2) -> bool:
     if a == b:
         return True
 
-    # cat/api/tale/auth.py:login:19 -> ['cat/api/tale/auth.py', 'login', '19'], если формат не из 3 частей, то false
+    # cat/api/tale/auth.py:login:19 -> ['cat/api/tale/auth.py', 'login', '19']
     a_parts = a.rsplit(":", 2)
     b_parts = b.rsplit(":", 2)
+    
     if len(a_parts) != 3 or len(b_parts) != 3:
         return False
 
     a_path, a_name, a_line = a_parts
     b_path, b_name, b_line = b_parts
 
-    if a_path != b_path or a_name != b_name:
+    if a_name != b_name:
+        return False
+
+    if not (a_path.endswith(b_path) or b_path.endswith(a_path)):
         return False
 
     try:
@@ -55,7 +58,6 @@ def precision_at_5(
     if not predictions or not questions:
         return 0.0
 
-    # поиск в словаре намного быстрее, чем в списке
     questions_map = {q.question_id: q for q in questions}
     scores: list[float] = []
 
