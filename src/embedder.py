@@ -33,7 +33,8 @@ def chunk_to_text(chunk: dict) -> str:
 
 def load_model(model_name: str = MODEL_NAME) -> SentenceTransformer:
     """
-    Загружает модель sentence-transformers.
+    Загружает модель sentence-transformers. Если она есть локально - берем без
+    проверок онлайн. Если нету - загружаем.
 
     Args:
         model_name: Имя модели из HuggingFace.
@@ -41,8 +42,11 @@ def load_model(model_name: str = MODEL_NAME) -> SentenceTransformer:
     Returns:
         Загруженная модель.
     """
-    return SentenceTransformer(model_name)
-
+    try:
+        return SentenceTransformer(model_name, local_files_only=True)
+    except Exception:
+        print(f"Модель {model_name} не найдена в кэше. Загружаю...")
+        return SentenceTransformer(model_name)
 
 def encode_texts(
     model: SentenceTransformer,
