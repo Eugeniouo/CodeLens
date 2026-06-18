@@ -2,3 +2,4 @@ chroma_db/
 venv/
 __pycache__/
 data/codebase_python
+.env
