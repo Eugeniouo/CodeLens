@@ -6,8 +6,9 @@ from typing import Any
 import chromadb
 from sentence_transformers import SentenceTransformer
 
+from src.config import COLLECTION_NAME, DB_PATH
+
 from .embedder import chunk_to_text, encode_texts, load_model
-from src.config import DB_PATH, COLLECTION_NAME
 
 type CodeChunk = dict[str, Any]
 type MetadataValue = str | int | float | bool
@@ -25,7 +26,7 @@ def get_collection(
     if reset:
         try:
             client.delete_collection(name=collection_name)
-        except ValueError:
+        except Exception:
             pass
 
     return client.get_or_create_collection(
@@ -38,7 +39,7 @@ def get_chunk_id(chunk: CodeChunk) -> str:
     """Возвращает ID чанка."""
     if chunk_id := chunk.get("id"):
         return str(chunk_id)
-        
+
     return f"{chunk.get('file_path', 'unknown')}:{chunk.get('name', 'unknown')}:{chunk.get('start_line', '0')}"
 
 
@@ -87,19 +88,23 @@ def index_chunks(
         raise ValueError("Количество texts должно совпадать с количеством chunks.")
 
     model = model or load_model()
-    collection = get_collection(db_path=db_path, collection_name=collection_name, reset=reset)
+    collection = get_collection(
+        db_path=db_path, collection_name=collection_name, reset=reset
+    )
 
     print("Создаём эмбеддинги...")
     embeddings = encode_texts(model=model, texts=texts, show_progress_bar=True)
 
     print("Подготавливаем данные для БД...")
     ids = [get_chunk_id(chunk) for chunk in chunks]
-    
-    documents = [str(chunk.get("source_code") or text) for chunk, text in zip(chunks, texts)]
+
+    documents = [
+        str(chunk.get("source_code") or text) for chunk, text in zip(chunks, texts)
+    ]
     metadatas = [build_metadata(chunk) for chunk in chunks]
 
     print("Сохраняем чанки в ChromaDB...")
-    
+
     embeddings_list = embeddings.tolist()
 
     for start in range(0, len(chunks), batch_size):
@@ -114,7 +119,9 @@ def index_chunks(
 
         print(f"Сохранено чанков: {min(end, len(chunks))}/{len(chunks)}")
 
-    files_indexed = len({chunk["file_path"] for chunk in chunks if "file_path" in chunk})
+    files_indexed = len(
+        {chunk["file_path"] for chunk in chunks if "file_path" in chunk}
+    )
 
     return {
         "chunks_indexed": len(chunks),
