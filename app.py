@@ -15,6 +15,7 @@ from src.indexer import COLLECTION_NAME, DB_PATH, index_chunks
 from src.metrics import Prediction, Question, evaluate
 from src.parser import parse_directory
 from src.searcher import init_searcher, search
+from src.config import HYBRID_ALPHA
 
 st.set_page_config(page_title="CodeLens | Внутренний портал", page_icon="🔍", layout="wide")
 
@@ -201,14 +202,23 @@ elif st.session_state["current_page"] == "Поиск":
             st.write("")
             search_button = st.button("Выполнить поиск", use_container_width=True)
 
+        # Выводим слайдер на всю ширину (без колонок)
+        alpha = st.slider(
+            "Баланс (Векторный - Лексический)", 
+            0.0, 1.0, float(HYBRID_ALPHA), 0.05, 
+            format="%.2f",
+            help="1.0 = полностью векторный поиск, 0.0 = точное совпадение слов."
+        )
+        
+        # Выводим чекбокс на следующей строке (без колонок)
         has_token = bool(os.environ.get("GROQ_API_KEY") or os.getenv("API_KEY"))
         if not has_token:
-            st.warning("Ключ API (GROQ_API_KEY) не найден. Анализ LLM недоступен.")
+            st.warning("Ключ API не найден. Анализ LLM недоступен.")
         use_llm = st.checkbox("Запросить аналитический ответ LLM", value=has_token, disabled=not has_token)
 
         if search_button and query:
-            with st.spinner("Выполнение векторного поиска..."):
-                results, latency = search(query, top_k=5)
+            with st.spinner("Выполнение гибридного поиска..."):
+                results, latency = search(query, top_k=5, alpha=alpha)
 
             st.caption(f"Время выполнения запроса: {latency:.3f} сек.")
             st.divider()
@@ -248,7 +258,7 @@ elif st.session_state["current_page"] == "Поиск":
                         st.caption(f"ID фрагмента: {chunk_id}")
                     with c2:
                         st.markdown(
-                            f"<div style='text-align: right; color: #475467; font-weight: 600;'>Совпадение: {score * 100:.1f}%</div>",
+                            f"<div style='text-align: right; color: #475467; font-weight: 600;'>RRF Score: {score:.4f}</div>",
                             unsafe_allow_html=True,
                         )
 
@@ -264,7 +274,7 @@ elif st.session_state["current_page"] == "Метрики":
         """
         <div class="page-header">
             <h1>Валидация системы</h1>
-            <p>Автоматическое тестирование RAG-алгоритма на размеченном датасете (eval_questions.json).</p>
+            <p>Автоматическое тестирование RAG-алгоритма на размеченном датасете.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -284,6 +294,12 @@ elif st.session_state["current_page"] == "Метрики":
                 raw_data = json.load(f)
 
             st.info(f"Доступно тестовых сценариев: {len(raw_data)}")
+            
+            alpha_eval = st.slider(
+                "Параметр баланса (Векторный - Лексический)", 
+                0.0, 1.0, float(HYBRID_ALPHA), 0.05, 
+                key="eval_alpha"
+            )
 
             if st.button("Запустить тестирование"):
                 questions = [
@@ -303,7 +319,7 @@ elif st.session_state["current_page"] == "Метрики":
 
                 for i, q in enumerate(questions):
                     status_text.text(f"Обработка [{i + 1}/{len(questions)}]: {q.query[:80]}...")
-                    results, latency = search(q.query, top_k=5)
+                    results, latency = search(q.query, top_k=5, alpha=alpha_eval)
                     total_latency += latency
                     top_5_ids = [res["id"] for res in results]
                     predictions.append(
@@ -346,7 +362,7 @@ elif st.session_state["current_page"] == "Индексация":
 
     with st.container(border=True):
         repo_path = st.text_input("Абсолютный или относительный путь к директории проекта:", value="data/codebase_python")
-        reset_db = st.checkbox("Принудительная очистка существующей БД (Reset ChromaDB)", value=True)
+        reset_db = st.checkbox("Принудительная очистка существующей БД", value=True)
 
         if st.button("Запустить индексацию"):
             if not Path(repo_path).exists() or not Path(repo_path).is_dir():

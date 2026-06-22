@@ -6,7 +6,6 @@
 """
 
 from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Sequence
 
@@ -27,6 +26,7 @@ def _normalize_chunk_id(chunk_id: str) -> str:
 def _chunks_match(a: str, b: str, line_tolerance: int = 2) -> bool:
     a = _normalize_chunk_id(a)
     b = _normalize_chunk_id(b)
+    
     if a == b:
         return True
 

@@ -1,26 +1,29 @@
 """Модуль для сохранения векторов в ChromaDB."""
 
 import time
+import pickle
+import re
 from typing import Any
 
 import chromadb
 from sentence_transformers import SentenceTransformer
+from rank_bm25 import BM25Okapi
 
-from src.config import COLLECTION_NAME, DB_PATH
-
+from src.config import COLLECTION_NAME, DB_PATH, BM25_INDEX_PATH
 from .embedder import chunk_to_text, encode_texts, load_model
 
 type CodeChunk = dict[str, Any]
 type MetadataValue = str | int | float | bool
 type IndexStats = dict[str, int | float]
 
+def tokenize(text: str) -> list[str]:
+    return re.findall(r'(?u)\b\w+\b', text.lower())
 
 def get_collection(
     db_path: str | Any = DB_PATH,
     collection_name: str = COLLECTION_NAME,
     reset: bool = False,
 ):
-    """Создаёт или открывает коллекцию ChromaDB."""
     client = chromadb.PersistentClient(path=str(db_path))
 
     if reset:
@@ -34,17 +37,13 @@ def get_collection(
         metadata={"hnsw:space": "cosine"},
     )
 
-
 def get_chunk_id(chunk: CodeChunk) -> str:
-    """Возвращает ID чанка."""
     if chunk_id := chunk.get("id"):
         return str(chunk_id)
 
     return f"{chunk.get('file_path', 'unknown')}:{chunk.get('name', 'unknown')}:{chunk.get('start_line', '0')}"
 
-
 def build_metadata(chunk: CodeChunk) -> dict[str, MetadataValue]:
-    """Формирует очищенную metadata для ChromaDB."""
     file_path = str(chunk.get("file_path", "unknown"))
     name = str(chunk.get("name", "unknown"))
 
@@ -66,7 +65,6 @@ def build_metadata(chunk: CodeChunk) -> dict[str, MetadataValue]:
         for k, v in meta.items()
     }
 
-
 def index_chunks(
     chunks: list[CodeChunk],
     texts: list[str] | None = None,
@@ -76,7 +74,6 @@ def index_chunks(
     batch_size: int = 128,
     reset: bool = False,
 ) -> IndexStats:
-    """Сохраняет чанки и их эмбеддинги в ChromaDB."""
     started_at = time.perf_counter()
 
     if not chunks:
@@ -85,25 +82,18 @@ def index_chunks(
     texts = texts or [chunk_to_text(chunk) for chunk in chunks]
 
     if len(texts) != len(chunks):
-        raise ValueError("Количество texts должно совпадать с количеством chunks.")
+        raise ValueError()
 
     model = model or load_model()
     collection = get_collection(
         db_path=db_path, collection_name=collection_name, reset=reset
     )
 
-    print("Создаём эмбеддинги...")
     embeddings = encode_texts(model=model, texts=texts, show_progress_bar=True)
 
-    print("Подготавливаем данные для БД...")
     ids = [get_chunk_id(chunk) for chunk in chunks]
-
-    documents = [
-        str(chunk.get("source_code") or text) for chunk, text in zip(chunks, texts)
-    ]
+    documents = [str(chunk.get("source_code") or text) for chunk, text in zip(chunks, texts)]
     metadatas = [build_metadata(chunk) for chunk in chunks]
-
-    print("Сохраняем чанки в ChromaDB...")
 
     embeddings_list = embeddings.tolist()
 
@@ -117,7 +107,11 @@ def index_chunks(
             metadatas=metadatas[start:end],
         )
 
-        print(f"Сохранено чанков: {min(end, len(chunks))}/{len(chunks)}")
+    tokenized_corpus = [tokenize(doc) for doc in documents]
+    bm25 = BM25Okapi(tokenized_corpus)
+    
+    with open(BM25_INDEX_PATH, "wb") as f:
+        pickle.dump({"model": bm25, "ids": ids}, f)
 
     files_indexed = len(
         {chunk["file_path"] for chunk in chunks if "file_path" in chunk}
