@@ -30,7 +30,6 @@ def _chunks_match(a: str, b: str, line_tolerance: int = 2) -> bool:
     if a == b:
         return True
 
-    # cat/api/tale/auth.py:login:19 -> ['cat/api/tale/auth.py', 'login', '19']
     a_parts = a.rsplit(":", 2)
     b_parts = b.rsplit(":", 2)
     

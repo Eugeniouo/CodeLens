@@ -17,11 +17,11 @@ def chunk_to_text(chunk: dict) -> str:
     Returns:
         Строка, готовая для векторизации.
     """
-    #ATTENTION: возможно, стоит передавать не только имя, но и путь к файлу, если система будет работать не точно.
+    
     parts = [
         f"passage: Type: {chunk['type']}", #passage - префикс для улучшения качества поиска e5-small
         f"Name: {chunk['name']}",
-        f"File: {Path(chunk['file_path']).name}",
+        f"File: {chunk['file_path']}",
     ]
 
     if chunk.get("docstring"):

@@ -183,7 +183,6 @@ class ChunkCollector(ast.NodeVisitor):
             ),
         })
 
-        # Запоминаем функцию в стеке, чтобы поймать вложенные функции
         self.function_stack.append(node.name)
         self.generic_visit(node)
         self.function_stack.pop()
