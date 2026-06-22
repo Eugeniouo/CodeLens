@@ -6,3 +6,4 @@ data/codebase_python
 .DS_Store
 dataset_case3_v1
 codelens.egg-info
+*.pkl
