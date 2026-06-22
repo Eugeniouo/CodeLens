@@ -17,7 +17,7 @@ def chunk_to_text(chunk: dict) -> str:
     Returns:
         Строка, готовая для векторизации.
     """
-    #ATTENTION: возможно, стоит передавать не только имя, но и путь к файлу, если система будет работать не точно.
+    
     parts = [
         f"passage: Type: {chunk['type']}", #passage - префикс для улучшения качества поиска e5-small
         f"Name: {chunk['name']}",

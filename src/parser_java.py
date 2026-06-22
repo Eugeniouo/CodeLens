@@ -15,7 +15,6 @@ JAVA_LANGUAGE = Language(tsjava.language())
 
 type ChunkDict = dict[str, str | int]
 
-# Типы узлов-аннотаций — пропускаем при поиске Javadoc
 ANNOTATION_TYPES = {
     "annotation",
     "marker_annotation",
@@ -74,15 +73,12 @@ def extract_javadoc(node, source_code: bytes) -> str:
             if comment_text.strip().startswith("/**"):
                 return clean_javadoc(comment_text)
 
-        # Аннотации (@Override, @Autowired и т.д.) — пропускаем, ищем дальше
         elif node_type in ANNOTATION_TYPES:
             pass
 
-        # Пробелы и однострочные комментарии — пропускаем
         elif node_type in {"whitespace", "line_comment", "comment"}:
             pass
 
-        # Всё остальное — break, Javadoc не относится к этому узлу
         else:
             break
 
@@ -178,7 +174,7 @@ def build_class_skeleton(node, source_code: bytes) -> str:
                 lines.append(f"    {return_text} {method_name}({params_text}) {{ ... }}")
 
         elif child.type in CONTAINER_TYPES:
-            # Вложенный класс/интерфейс/энум
+            # Вложенный класс/интерфейс/enum
             nested_name = child.child_by_field_name("name")
             if nested_name:
                 container_type = child.type.replace("_declaration", "")
@@ -237,7 +233,7 @@ def parse_java_file(file_path: str, repo_root: str | None = None) -> list[ChunkD
                     for child in body.children:
                         visit(child, new_stack)
 
-            return  # не обходим детей дважды
+            return
 
         # Обрабатываем методы и конструкторы
         elif node.type in {"method_declaration", "constructor_declaration"}:

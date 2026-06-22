@@ -2,8 +2,12 @@ import importlib
 import json
 import time
 from pathlib import Path
+import os
+from dotenv import load_dotenv
 
 import streamlit as st
+
+load_dotenv()
 
 import src.searcher
 from src.embedder import load_model
@@ -26,24 +30,20 @@ st.markdown(
         font-family: 'Inter', sans-serif !important;
     }
 
-    /* Строгий светло-серый фон приложения */
     html body .stApp {
         background-color: #F4F5F7 !important;
     }
 
-    /* Скрытие служебных элементов Streamlit */
     header, [data-testid="stHeader"], [data-testid="stDecoration"], .stDeployButton, #MainMenu {
         display: none !important;
         height: 0 !important;
     }
 
-    /* Типографика */
     h1, h2, h3, h4 {
         color: #101828 !important;
         font-weight: 600;
     }
 
-    /* Универсальная белая карточка (B2B стиль) */
     .rt-card {
         background-color: #FFFFFF !important;
         border: 1px solid #E4E7EC !important;
@@ -53,7 +53,6 @@ st.markdown(
         box-shadow: 0 1px 3px rgba(16, 24, 40, 0.05) !important;
     }
 
-    /* Заголовки страниц */
     .page-header {
         margin-bottom: 24px;
         padding-bottom: 16px;
@@ -69,7 +68,6 @@ st.markdown(
         margin: 0;
     }
 
-    /* Базовые кнопки */
     div.stButton > button {
         background-color: #FFFFFF !important;
         color: #344054 !important;
@@ -83,14 +81,12 @@ st.markdown(
         width: 100%;
     }
 
-    /* Акцентное наведение (Корпоративный оранжевый) */
     div.stButton > button:hover {
         border-color: #FF4F12 !important;
         color: #FF4F12 !important;
         background-color: #FFF9F6 !important;
     }
     
-    /* Специфичные настройки для больших кнопок-плиток на Главной */
     .menu-tile div.stButton > button {
         min-height: 120px !important;
         text-align: left !important;
@@ -101,7 +97,6 @@ st.markdown(
         line-height: 1.5 !important;
     }
 
-    /* Поля ввода */
     div[data-testid="stTextInput"] input {
         background-color: #FFFFFF !important;
         color: #101828 !important;
@@ -115,7 +110,6 @@ st.markdown(
         box-shadow: 0 0 0 4px rgba(255, 79, 18, 0.1) !important;
     }
 
-    /* Стилизация алертов */
     div[data-testid="stAlert"] {
         background-color: #F9FAFB !important;
         border: 1px solid #E4E7EC !important;
@@ -124,7 +118,6 @@ st.markdown(
         color: #344054 !important;
     }
 
-    /* Очистка блоков кода (чтобы не перебивалась подсветка) */
     pre, code {
         font-family: 'JetBrains Mono', 'Courier New', monospace !important;
         font-size: 0.9rem !important;
@@ -134,10 +127,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Прогрев модели и БД
 @st.cache_resource
 def warmup_backend():
-    """Загружает модель и БД в память."""
     try:
         init_searcher()
         search("warmup query", top_k=1)
@@ -145,9 +136,7 @@ def warmup_backend():
     except Exception as e:
         return False, str(e)
 
-
 backend_ready, backend_error = warmup_backend()
-
 
 if st.session_state["current_page"] == "Главная":
     st.markdown(
@@ -155,7 +144,7 @@ if st.session_state["current_page"] == "Главная":
         <div class="rt-card" style="text-align: center; padding: 48px 24px;">
             <h1 style="font-size: 3rem; margin-bottom: 12px; color: #101828;">Платформа CodeLens</h1>
             <p style="color: #475467; font-size: 1.1rem; max-width: 600px; margin: 0 auto;">
-                Внутренний инструмент семантического поиска и архитектурного аудита кодовой базы
+                Инструмент семантического поиска по Python и Java кодовым базам.
             </p>
         </div>
         """,
@@ -187,7 +176,6 @@ if st.session_state["current_page"] == "Главная":
             st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
 
-
 elif st.session_state["current_page"] == "Поиск":
     if st.button("← На главную", key="back_search"):
         st.session_state["current_page"] = "Главная"
@@ -197,7 +185,6 @@ elif st.session_state["current_page"] == "Поиск":
         """
         <div class="page-header">
             <h1>Семантический поиск</h1>
-            <p>Локализация бизнес-логики в исходном коде по запросам на естественном языке.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -214,7 +201,10 @@ elif st.session_state["current_page"] == "Поиск":
             st.write("")
             search_button = st.button("Выполнить поиск", use_container_width=True)
 
-        use_llm = st.checkbox("Запросить аналитический ответ LLM", value=True)
+        has_token = bool(os.environ.get("GROQ_API_KEY") or os.getenv("API_KEY"))
+        if not has_token:
+            st.warning("Ключ API (GROQ_API_KEY) не найден. Анализ LLM недоступен.")
+        use_llm = st.checkbox("Запросить аналитический ответ LLM", value=has_token, disabled=not has_token)
 
         if search_button and query:
             with st.spinner("Выполнение векторного поиска..."):
@@ -262,11 +252,9 @@ elif st.session_state["current_page"] == "Поиск":
                             unsafe_allow_html=True,
                         )
 
-                    # Используем нативную подсветку синтаксиса
-                    st.code(source_code, language="python")
+                    lang = "java" if str(file_path).endswith(".java") else "python"
+                    st.code(source_code, language=lang)
 
-
-# Навигация: Расчет метрик
 elif st.session_state["current_page"] == "Метрики":
     if st.button("← На главную", key="back_metrics"):
         st.session_state["current_page"] = "Главная"
@@ -336,8 +324,6 @@ elif st.session_state["current_page"] == "Метрики":
                 m2.metric(label="Mean Reciprocal Rank (MRR)", value=f"{mrr_score:.3f}")
                 m3.metric(label="Средняя задержка (Latency)", value=f"{avg_latency:.3f} s")
 
-
-# Навигация: Индексация базы
 elif st.session_state["current_page"] == "Индексация":
     if st.button("← На главную", key="back_indexing"):
         st.session_state["current_page"] = "Главная"
@@ -347,7 +333,7 @@ elif st.session_state["current_page"] == "Индексация":
         """
         <div class="page-header">
             <h1>Индексация кодовой базы</h1>
-            <p>Анализ AST-деревьев Python-проектов и формирование векторного представления в ChromaDB.</p>
+            <p>Анализ AST дерева Python-проекта и запись векторов в ChromaDB.</p>
         </div>
         """,
         unsafe_allow_html=True,
