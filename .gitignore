@@ -3,3 +3,6 @@ venv/
 __pycache__/
 data/codebase_python
 .env
+.DS_Store
+dataset_case3_v1
+codelens.egg-info
