@@ -44,7 +44,7 @@
 
 1. Выполните:
    ```
-   cp .env.template .env
+   cp .env.example .env
    ```
    (опционально) для работы LLM установите в нём ключ API_KEY для API ключа groq в .env файл.
 
